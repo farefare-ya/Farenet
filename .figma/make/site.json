@@ -1,0 +1,11 @@
+{
+  "title": "Farenet",
+  "description": "Farenet — secure real-time messaging powered by Firebase.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
