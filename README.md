@@ -1,5 +1,7 @@
 # Farenet
 
+![Farenet preview](prtscr/preview.png)
+
 Farenet is a real-time messaging web app: private chats, group chats, and everything around them (contacts, blocking, discovery, and moderation). It's built with React, Vite, and Firebase.
 
 ## Features
