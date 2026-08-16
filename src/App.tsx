@@ -53,20 +53,12 @@ function AppContent() {
       {/* Main chat area */}
       <div className={`flex-1 flex flex-col min-w-0 ${mobileChatOpen ? "flex" : "hidden md:flex"}`}>
         {selectedChat ? (
-          <>
-            {/* Mobile back button */}
-            <div className="md:hidden absolute top-3 left-3 z-10">
-              <button
-                onClick={() => setMobileChatOpen(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-[#242f3d]"
-              >
-                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-[#7d90a0]">
-                  <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
-                </svg>
-              </button>
-            </div>
-            <ChatArea chat={selectedChat} usersMap={usersMap} onLeaveChat={() => { setSelectedChat(null); setMobileChatOpen(false); }} />
-          </>
+          <ChatArea
+            chat={selectedChat}
+            usersMap={usersMap}
+            onLeaveChat={() => { setSelectedChat(null); setMobileChatOpen(false); }}
+            onBack={() => setMobileChatOpen(false)}
+          />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center" style={{ background: "#0e1621" }}>
             <div className="text-center">

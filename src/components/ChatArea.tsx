@@ -22,10 +22,19 @@ interface ChatAreaProps {
   chat: Chat;
   usersMap: Record<string, UserProfile>;
   onLeaveChat: () => void;
+  onBack?: () => void;
 }
 
 const MAX_IMAGE_BYTES = 100 * 1024;
 const MAX_GIF_BYTES = 400 * 1024;
+const TYPING_TTL_MS = 4000; // a typing signal older than this is treated as stale/expired
+
+function isRecentlyTyping(val: any): boolean {
+  if (!val) return false;
+  const ms = val?.toMillis ? val.toMillis() : val instanceof Date ? val.getTime() : null;
+  if (ms == null) return false;
+  return Date.now() - ms < TYPING_TTL_MS;
+}
 
 function isSameDay(a: any, b: any) {
   const da = a?.toDate ? a.toDate() : new Date(a);
@@ -44,7 +53,7 @@ function replySnippet(msg: Message): string {
   return msg.text;
 }
 
-export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps) {
+export default function ChatArea({ chat, usersMap, onLeaveChat, onBack }: ChatAreaProps) {
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [liveChat, setLiveChat] = useState<Chat>(chat);
@@ -79,6 +88,16 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Typing indicators expire based on elapsed time, not just on an explicit
+  // clear write (which can be missed if a tab is closed abruptly) — this
+  // tick forces a re-render every second so an expired signal disappears
+  // on its own even with no new Firestore snapshot.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => forceTick((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
   useEffect(() => {
     setReplyingTo(null);
     setShowInfo(false);
@@ -87,7 +106,7 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
   useEffect(() => {
     return () => {
       if (currentUser) {
-        updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: false }).catch(() => {});
+        updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: null }).catch(() => {});
       }
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
     };
@@ -107,7 +126,7 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
   const chatPhotoURL = liveChat.isGroup ? liveChat.photoURL : otherProfile?.photoURL;
 
   const typingNames = Object.entries(liveChat.typing || {})
-    .filter(([uid, val]) => val && uid !== currentUser?.uid)
+    .filter(([uid, val]) => uid !== currentUser?.uid && isRecentlyTyping(val))
     .map(([uid]) => usersMap[uid]?.displayName || "Someone");
 
   let subtitle: string;
@@ -124,10 +143,10 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
     e.target.style.height = "auto";
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
     if (!currentUser) return;
-    updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: true }).catch(() => {});
+    updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: serverTimestamp() }).catch(() => {});
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => {
-      updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: false }).catch(() => {});
+      updateDoc(doc(db, "chats", chat.id), { [`typing.${currentUser.uid}`]: null }).catch(() => {});
     }, 2000);
   }
 
@@ -164,7 +183,7 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
         lastMessage: msgText,
         lastMessageTime: serverTimestamp(),
         lastSenderId: currentUser.uid,
-        [`typing.${currentUser.uid}`]: false,
+        [`typing.${currentUser.uid}`]: null,
       });
     } finally {
       setSending(false);
@@ -295,19 +314,33 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
   return (
     <div className="flex flex-col h-full" style={{ background: "#0e1621" }}>
       {/* Header */}
-      <button
-        onClick={() => setShowInfo(true)}
-        className="flex items-center gap-3 px-4 py-3 border-b border-[#0d1821] flex-shrink-0 w-full text-left hover:bg-[#1c2733] transition-colors"
+      <div
+        className="flex items-center gap-1 px-2 md:px-4 py-3 border-b border-[#0d1821] flex-shrink-0"
         style={{ background: "#17212b" }}
       >
-        <Avatar name={chatDisplayName} photoURL={chatPhotoURL} size={40} />
-        <div className="min-w-0">
-          <p className="text-white font-semibold text-sm truncate">{chatDisplayName}</p>
-          <p className={`text-xs truncate ${typingNames.length > 0 && !isBlocked ? "text-[#5288c1]" : "text-[#7d90a0]"}`}>
-            {subtitle}
-          </p>
-        </div>
-      </button>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="md:hidden w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#242f3d] transition-colors flex-shrink-0"
+          >
+            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-[#7d90a0]">
+              <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+            </svg>
+          </button>
+        )}
+        <button
+          onClick={() => setShowInfo(true)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left hover:bg-[#1c2733] transition-colors rounded-xl px-2 py-1.5 -mx-2"
+        >
+          <Avatar name={chatDisplayName} photoURL={chatPhotoURL} size={40} />
+          <div className="min-w-0">
+            <p className="text-white font-semibold text-sm truncate">{chatDisplayName}</p>
+            <p className={`text-xs truncate ${typingNames.length > 0 && !isBlocked ? "text-[#5288c1]" : "text-[#7d90a0]"}`}>
+              {subtitle}
+            </p>
+          </div>
+        </button>
+      </div>
 
       {liveChat.isGroup && liveChat.announcement && (
         <div className="px-4 py-2 text-xs text-[#f4d58d] flex items-start gap-2 flex-shrink-0" style={{ background: "#26241a" }}>
@@ -464,7 +497,7 @@ export default function ChatArea({ chat, usersMap, onLeaveChat }: ChatAreaProps)
         </div>
       )}
 
-      <div className="flex items-end gap-2 px-3 py-3 border-t border-[#0d1821] flex-shrink-0" style={{ background: "#17212b" }}>
+      <div className="flex items-center gap-2 px-3 py-3 border-t border-[#0d1821] flex-shrink-0" style={{ background: "#17212b" }}>
         <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
         <input ref={gifInputRef} type="file" accept="image/gif" className="hidden" onChange={handleGifSelect} />
 

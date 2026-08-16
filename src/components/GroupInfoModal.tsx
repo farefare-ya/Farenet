@@ -4,6 +4,7 @@ import { db } from "../firebase";
 import { compressImage } from "../imageUtils";
 import { hashPassword } from "../passwordUtils";
 import Avatar from "./Avatar";
+import ImageCropModal from "./ImageCropModal";
 import type { Chat, UserProfile } from "../types";
 
 interface GroupInfoModalProps {
@@ -23,6 +24,7 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
   const [memberSearch, setMemberSearch] = useState("");
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState("");
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const wallpaperRef = useRef<HTMLInputElement>(null);
 
@@ -31,17 +33,24 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
   const nonMembers = Object.values(usersMap).filter(
     (u) => !chat.members.includes(u.uid) && u.displayName?.toLowerCase().includes(memberSearch.toLowerCase())
   );
+  const adminCount = chat.admins?.length || 0;
 
-  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+  function handlePickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith("image/") || file.type === "image/gif") {
       setError("Please choose a JPG/PNG/WEBP image.");
+      if (photoRef.current) photoRef.current.value = "";
       return;
     }
+    setError("");
+    setCropFile(file);
+  }
+
+  async function handleCroppedPhoto(dataUrl: string) {
+    setCropFile(null);
     setBusy("photo");
     try {
-      const compressed = await compressImage(file, 100 * 1024);
-      await updateDoc(chatRef, { photoURL: compressed });
+      await updateDoc(chatRef, { photoURL: dataUrl });
     } catch {
       setError("Failed to upload group photo.");
     } finally {
@@ -106,12 +115,27 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
     await updateDoc(chatRef, { members: arrayRemove(uid), admins: arrayRemove(uid) }).finally(() => setBusy(""));
   }
 
+  async function toggleAdmin(uid: string) {
+    const isTargetAdmin = !!chat.admins?.includes(uid);
+    if (isTargetAdmin && adminCount <= 1) {
+      setError("A group needs at least one admin — promote someone else first.");
+      return;
+    }
+    setError("");
+    setBusy(`admin-${uid}`);
+    await updateDoc(chatRef, { admins: isTargetAdmin ? arrayRemove(uid) : arrayUnion(uid) }).finally(() => setBusy(""));
+  }
+
   async function addMember(uid: string) {
     setBusy(`add-${uid}`);
     await updateDoc(chatRef, { members: arrayUnion(uid) }).finally(() => setBusy(""));
   }
 
   async function leaveGroup() {
+    if (isAdmin && adminCount <= 1 && members.length > 1) {
+      setError("You're the only admin — promote someone else before leaving.");
+      return;
+    }
     await updateDoc(chatRef, { members: arrayRemove(currentUid), admins: arrayRemove(currentUid) });
     onLeft();
   }
@@ -140,7 +164,7 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
             </div>
             {isAdmin && (
               <>
-                <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+                <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={handlePickPhoto} />
                 <button onClick={() => photoRef.current?.click()} className="text-[#5288c1] text-xs font-medium">
                   Change Group Photo
                 </button>
@@ -227,7 +251,7 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
                   className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 ${chat.isPublic ? "bg-[#5288c1]" : "bg-[#242f3d]"}`}
                 >
                   <span
-                    className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${chat.isPublic ? "translate-x-4" : "translate-x-0.5"}`}
+                    className={`absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${chat.isPublic ? "translate-x-4" : "translate-x-0"}`}
                   />
                 </button>
               </label>
@@ -290,26 +314,38 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
             )}
 
             <div className="space-y-1">
-              {members.map((u) => (
-                <div key={u.uid} className="flex items-center gap-2 px-1 py-1.5">
-                  <Avatar name={u.displayName} photoURL={u.photoURL} size={32} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm truncate">
-                      {u.displayName} {u.uid === currentUid && <span className="text-[#7d90a0]">(you)</span>}
-                    </p>
-                    {chat.admins?.includes(u.uid) && <p className="text-[#5288c1] text-[10px]">Admin</p>}
+              {members.map((u) => {
+                const targetIsAdmin = !!chat.admins?.includes(u.uid);
+                return (
+                  <div key={u.uid} className="flex items-center gap-2 px-1 py-1.5">
+                    <Avatar name={u.displayName} photoURL={u.photoURL} size={32} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm truncate">
+                        {u.displayName} {u.uid === currentUid && <span className="text-[#7d90a0]">(you)</span>}
+                      </p>
+                      {targetIsAdmin && <p className="text-[#5288c1] text-[10px]">Admin</p>}
+                    </div>
+                    {isAdmin && u.uid !== currentUid && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => toggleAdmin(u.uid)}
+                          disabled={busy === `admin-${u.uid}`}
+                          className="text-[#5288c1] text-xs"
+                        >
+                          {targetIsAdmin ? "Remove Admin" : "Make Admin"}
+                        </button>
+                        <button
+                          onClick={() => kickMember(u.uid)}
+                          disabled={busy === `kick-${u.uid}`}
+                          className="text-[#e17076] text-xs"
+                        >
+                          Kick
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {isAdmin && u.uid !== currentUid && (
-                    <button
-                      onClick={() => kickMember(u.uid)}
-                      disabled={busy === `kick-${u.uid}`}
-                      className="text-[#e17076] text-xs"
-                    >
-                      Kick
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -322,6 +358,15 @@ export default function GroupInfoModal({ chat, currentUid, usersMap, onClose, on
           </button>
         </div>
       </div>
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          title="Crop Group Photo"
+          onCancel={() => { setCropFile(null); if (photoRef.current) photoRef.current.value = ""; }}
+          onDone={handleCroppedPhoto}
+        />
+      )}
     </div>
   );
 }

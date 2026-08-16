@@ -29,6 +29,13 @@ interface SidebarProps {
   usersMap: Record<string, UserProfile>;
 }
 
+function isRecentlyTyping(val: any): boolean {
+  if (!val) return false;
+  const ms = val?.toMillis ? val.toMillis() : val instanceof Date ? val.getTime() : null;
+  if (ms == null) return false;
+  return Date.now() - ms < 4000;
+}
+
 function shuffled<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -54,6 +61,12 @@ export default function Sidebar({ selectedChat, onSelectChat, usersMap }: Sideba
 
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, menuOpen, () => setMenuOpen(false));
+
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => forceTick((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
 
   const myProfile = currentUser ? usersMap[currentUser.uid] : null;
   const blockedUsers = myProfile?.blockedUsers || [];
@@ -360,7 +373,7 @@ export default function Sidebar({ selectedChat, onSelectChat, usersMap }: Sideba
             const isTyping =
               currentUser &&
               chat.typing &&
-              Object.entries(chat.typing).some(([uid, val]) => uid !== currentUser.uid && val);
+              Object.entries(chat.typing).some(([uid, val]) => uid !== currentUser.uid && isRecentlyTyping(val));
             return (
               <button
                 key={chat.id}
