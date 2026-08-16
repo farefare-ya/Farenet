@@ -53,20 +53,36 @@ export default function ImageCropModal({ file, onCancel, onDone, maxBytes = 100 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imgEl]);
 
+  const zoomAnchor = useRef<{ x: number; y: number } | null>(null);
+
+  function startZoomGesture() {
+    if (!imgEl) return;
+    const scale = baseScale * zoom;
+    zoomAnchor.current = {
+      x: (VIEWPORT / 2 - pos.left) / scale,
+      y: (VIEWPORT / 2 - pos.top) / scale,
+    };
+  }
+
+  function endZoomGesture() {
+    zoomAnchor.current = null;
+  }
+
   function handleZoomChange(newZoom: number) {
     if (!imgEl) {
       setZoom(newZoom);
       return;
     }
-    // Keep whatever natural-image point is currently at the viewport
-    // center fixed in place, instead of scaling outward from the
-    // top-left corner (which looked like the image "stretching down").
-    const oldScale = baseScale * zoom;
+    // The anchor (the natural-image point that should stay fixed at the
+    // viewport center) is captured once when the drag starts and reused
+    // for every step of that same gesture — this avoids any drift from
+    // recomputing off a `pos` that may not have re-rendered yet between
+    // rapid slider events.
+    if (!zoomAnchor.current) startZoomGesture();
+    const anchor = zoomAnchor.current!;
     const newScale = baseScale * newZoom;
-    const centerX = (VIEWPORT / 2 - pos.left) / oldScale;
-    const centerY = (VIEWPORT / 2 - pos.top) / oldScale;
-    const newLeft = VIEWPORT / 2 - centerX * newScale;
-    const newTop = VIEWPORT / 2 - centerY * newScale;
+    const newLeft = VIEWPORT / 2 - anchor.x * newScale;
+    const newTop = VIEWPORT / 2 - anchor.y * newScale;
     const newDispW = imgEl.width * newScale;
     const newDispH = imgEl.height * newScale;
     setZoom(newZoom);
@@ -148,7 +164,7 @@ export default function ImageCropModal({ file, onCancel, onDone, maxBytes = 100 
                 src={imgEl.src}
                 alt="crop preview"
                 draggable={false}
-                className="absolute pointer-events-none"
+                className="absolute pointer-events-none max-w-none max-h-none"
                 style={{ left: pos.left, top: pos.top, width: dispW, height: dispH }}
               />
             )}
@@ -165,6 +181,8 @@ export default function ImageCropModal({ file, onCancel, onDone, maxBytes = 100 
               step={0.01}
               value={zoom}
               onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
+              onPointerDown={startZoomGesture}
+              onPointerUp={endZoomGesture}
               className="flex-1 accent-[#5288c1]"
             />
           </div>
